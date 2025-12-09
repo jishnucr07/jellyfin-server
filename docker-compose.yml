@@ -1,0 +1,47 @@
+services:
+  # 1. Jellyfin (Media Server)
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    network_mode: "host"
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config/jellyfin:/config
+      - /srv/media:/media
+    devices:
+      - /dev/dri:/dev/dri  # Intel QuickSync for Transcoding
+    restart: unless-stopped
+
+  # 2. qBittorrent (Downloader)
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    network_mode: "host"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - /srv/media/downloads:/downloads  # Downloads go here first
+    restart: unless-stopped
+
+  # 3. The Sorter (AI Watchdog)
+  sorter:
+    build: ./sorter
+    container_name: media_sorter
+    volumes:
+      - /srv/media:/media                # Needs access to move files
+      - /srv/media/downloads:/downloads  # Watches this folder
+    restart: unless-stopped
+  
+  telegram-bot:
+    build: ./sorter
+    container_name: telegram_bot
+    command: ["python","-u","bot.py"]
+    volumes:
+      - /srv/media:/media
+      - /srv/media/downloads:/downloads
+    restart: unless-stopped    
