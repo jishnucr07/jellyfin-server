@@ -32,7 +32,7 @@ services:
   sorter:
     build: ./sorter
     container_name: media_sorter
-    .env_file: .env
+    env_file: .env
     volumes:
       - /srv/media:/media                # Needs access to move files
       - /srv/media/downloads:/downloads  # Watches this folder
@@ -41,7 +41,7 @@ services:
   telegram-bot:
     build: ./sorter
     container_name: telegram_bot
-    .env_file: .env
+    env_file: .env
     command: ["python","-u","bot.py"]
     volumes:
       - /srv/media:/media
