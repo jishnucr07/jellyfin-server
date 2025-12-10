@@ -4,6 +4,7 @@ import re
 import time
 import google.generativeai as genai
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
@@ -12,12 +13,23 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # <--- PASTE KEY
 WATCH_FOLDER = os.getenv("WATCH_FOLDER")  # Inside Docker, this maps to your staging
 MOVIES_PATH = os.getenv("MOVIES_PATH")
 SERIES_PATH = os.getenv("SERIES_PATH")
+JELLYFIN_URL = "http://jellyfin:8096"
+JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY")
 # --------------
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 print("👀 Sorter Watchdog started... waiting for files.")
+
+
+def scan_jellyfin():
+    try:
+        url = f"{JELLYFIN_URL}/Library/Refresh?api_key={JELLYFIN_API_KEY}"
+        requests.post(url)
+        print("Sent 'Scan Library' Command to Jellyfin")
+    except Exception as e:
+        print(f"⚠️ Failed to trigger Jellyfin scan: {e}")
 
 
 def ask_gemini(filename):
@@ -36,7 +48,7 @@ def process_files():
     # Scan the folder
     for item in os.listdir(WATCH_FOLDER):
         target = os.path.join(WATCH_FOLDER, item)
-        if item.startswith("."):
+        if item.startswith(".") or item == "incomplete" or item == "temp":
             continue  # Skip hidden temp files
 
         # Wait if file is still growing (downloading)
@@ -67,7 +79,10 @@ def process_files():
             shutil.move(target, os.path.join(dest, item))
             print(f"✅ Moved to: {dest}")
             # Fix permissions for Jellyfin
+            os.system(f"chmod -R 1000:1000'{dest}'")
             os.system(f"chmod -R 777 '{dest}'")
+
+            scan_jellyfin()
         except Exception as e:
             print(f"❌ Error: {e}")
 

@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y gcc
 
-RUN pip install --no-cache-dir telethon google-generativeai cryptg watchdog
+RUN pip install --no-cache-dir telethon google-generativeai cryptg watchdog requests
 
 COPY . /app/
 
