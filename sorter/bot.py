@@ -65,12 +65,14 @@ async def handler(event):
     if sender.username != AUTHORIZED_USER:
         return
 
-    if event.file:
+    if event.media and hasattr(event.media, "document"):
+        doc = event.media.document
         file_name = "Unknown.mp4"
-        for attr in event.file.attributes:
-            if isinstance(attr, DocumentAttributeFilename):
-                file_name = attr.file_name
-                break
+        if hasattr(doc, "attributes"):
+            for attr in doc.attributes:
+                if isinstance(attr, DocumentAttributeFilename):
+                    file_name = attr.file_name
+                    break
 
         msg = await event.reply(f"⬇️ Downloading `{file_name}`...")
 
