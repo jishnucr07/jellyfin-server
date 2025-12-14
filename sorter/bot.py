@@ -2,7 +2,7 @@ import os
 import asyncio
 import math
 import sys
-from telethon import TelegramClient, events, utils
+from telethon import TelegramClient, events
 from telethon.tl.types import DocumentAttributeFilename
 
 # --- CONFIGURATION ---
@@ -22,20 +22,19 @@ client = TelegramClient("bot_session", API_ID, API_HASH).start(bot_token=BOT_TOK
 
 
 async def fast_download(client, message, filename, status_msg):
-    """
-    Downloads the file from 'message' but updates 'status_msg' with progress.
-    """
-    media = message.media  # <--- NOW READING FROM USER MESSAGE
+    media = message.media
     if not media or not hasattr(media, "document"):
-        raise ValueError("No document found in message")
+        raise ValueError("No document found")
 
     doc = media.document
-    input_location = utils.get_input_location(media)
-    file_size = int(doc.size)
+    # FIX: We use the 'doc' object directly. No utils.get_input_location needed.
 
+    file_size = int(doc.size)
     path = os.path.join(DOWNLOAD_PATH, filename)
-    chunk_size = 1024 * 1024
+    chunk_size = 1024 * 1024  # 1 MB chunks
     total_chunks = math.ceil(file_size / chunk_size)
+
+    # 4 Parallel connections
     semaphore = asyncio.Semaphore(4)
 
     last_display_time = 0
@@ -44,11 +43,9 @@ async def fast_download(client, message, filename, status_msg):
     async def download_chunk(file_obj, offset, size_to_download):
         nonlocal downloaded_chunks, last_display_time
         async with semaphore:
+            # FIX IS HERE: We pass 'doc' directly to iter_download
             async for chunk in client.iter_download(
-                input_location,
-                offset=offset,
-                limit=size_to_download,
-                request_size=64 * 1024,
+                doc, offset=offset, limit=size_to_download, request_size=64 * 1024
             ):
                 file_obj.seek(offset)
                 file_obj.write(chunk)
@@ -61,7 +58,6 @@ async def fast_download(client, message, filename, status_msg):
             if now - last_display_time > 3:
                 percent = (downloaded_chunks / total_chunks) * 100
                 try:
-                    # Update the Status Message (Bot's reply)
                     await status_msg.edit(
                         f"🚀 Downloading `{filename}`: {percent:.1f}%"
                     )
@@ -92,7 +88,6 @@ async def handler(event):
     if event.media and hasattr(event.media, "document"):
         doc = event.media.document
 
-        # Get Filename
         file_name = "Unknown.mp4"
         if hasattr(doc, "attributes"):
             for attr in doc.attributes:
@@ -100,13 +95,10 @@ async def handler(event):
                     file_name = attr.file_name
                     break
 
-        # Reply with status
         status_msg = await event.reply(f"🚀 Found `{file_name}`. Initializing...")
 
         try:
-            # FIX IS HERE: We pass 'event.message' (source) AND 'status_msg' (output)
             await fast_download(client, event.message, file_name, status_msg)
-
             await status_msg.edit(f"✅ **Done!** `{file_name}` is ready.")
             print(f"✅ Finished: {file_name}")
         except Exception as e:
