@@ -1,11 +1,11 @@
 import os
 import asyncio
 import math
+import sys
 from telethon import TelegramClient, events, utils
 from telethon.tl.types import DocumentAttributeFilename
 
 # --- CONFIGURATION ---
-# Force Integer conversion to prevent "str" errors
 try:
     API_ID = int(os.getenv("API_ID").strip())
     API_HASH = os.getenv("API_HASH").strip()
@@ -16,89 +16,68 @@ except Exception as e:
     exit(1)
 
 DOWNLOAD_PATH = "/downloads"
-# ---------------------
 
-print("🤖 Initializing High-Speed Bot...")
+print("🤖 Initializing Client...")
 client = TelegramClient("bot_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 
-async def fast_download(client, message, filename):
+async def fast_download(client, message, filename, status_msg):
     """
-    High-performance parallel downloader.
-    Downloads in 1MB chunks using 4 concurrent workers.
+    Downloads the file from 'message' but updates 'status_msg' with progress.
     """
-    # 1. Get the exact file object and size
-    media = message.media
+    media = message.media  # <--- NOW READING FROM USER MESSAGE
     if not media or not hasattr(media, "document"):
-        raise ValueError("No document found")
+        raise ValueError("No document found in message")
 
     doc = media.document
     input_location = utils.get_input_location(media)
-    file_size = int(doc.size)  # <--- FORCE INT TO FIX YOUR ERROR
+    file_size = int(doc.size)
 
     path = os.path.join(DOWNLOAD_PATH, filename)
-
-    # 2. Parallel Config
-    chunk_size = 1024 * 1024  # 1 MB per chunk
+    chunk_size = 1024 * 1024
     total_chunks = math.ceil(file_size / chunk_size)
-    semaphore = asyncio.Semaphore(4)  # 4 Parallel connections (Safe for Telegram)
+    semaphore = asyncio.Semaphore(4)
 
-    # Display helper
     last_display_time = 0
     downloaded_chunks = 0
 
     async def download_chunk(file_obj, offset, size_to_download):
         nonlocal downloaded_chunks, last_display_time
         async with semaphore:
-            try:
-                # Request specific byte range from Telegram
-                async for chunk in client.iter_download(
-                    input_location,
-                    offset=offset,
-                    limit=size_to_download,
-                    request_size=64 * 1024,
-                ):
-                    file_obj.seek(offset)
-                    file_obj.write(chunk)
+            async for chunk in client.iter_download(
+                input_location,
+                offset=offset,
+                limit=size_to_download,
+                request_size=64 * 1024,
+            ):
+                file_obj.seek(offset)
+                file_obj.write(chunk)
 
-                downloaded_chunks += 1
+            downloaded_chunks += 1
 
-                # Update Progress (Every 3 seconds)
-                import time
+            import time
 
-                now = time.time()
-                if now - last_display_time > 3:
-                    percent = (downloaded_chunks / total_chunks) * 100
-                    try:
-                        await message.edit(
-                            f"🚀 Downloading `{filename}`: {percent:.1f}%"
-                        )
-                        last_display_time = now
-                    except:
-                        pass
-            except Exception as e:
-                print(f"Chunk error at {offset}: {e}")
-                raise e
+            now = time.time()
+            if now - last_display_time > 3:
+                percent = (downloaded_chunks / total_chunks) * 100
+                try:
+                    # Update the Status Message (Bot's reply)
+                    await status_msg.edit(
+                        f"🚀 Downloading `{filename}`: {percent:.1f}%"
+                    )
+                    last_display_time = now
+                except:
+                    pass
 
-    # 3. Create file and start tasks
-    print(
-        f"⬇️ Starting Parallel Download: {filename} ({file_size / 1024 / 1024:.2f} MB)"
-    )
+    print(f"⬇️ Starting Parallel Download: {filename}")
     with open(path, "wb") as f:
-        # Pre-allocate file size (Prevents fragmentation)
         f.truncate(file_size)
-
         tasks = []
         for i in range(total_chunks):
             offset = i * chunk_size
-            # Calculate size for this specific chunk (handle last chunk)
             current_chunk_size = min(chunk_size, file_size - offset)
-
-            # Create async task
             task = asyncio.create_task(download_chunk(f, offset, current_chunk_size))
             tasks.append(task)
-
-        # Wait for all chunks to finish
         await asyncio.gather(*tasks)
 
     return path
@@ -110,11 +89,10 @@ async def handler(event):
     if not sender or sender.username != AUTHORIZED_USER:
         return
 
-    # Only process Documents (Video/Files)
     if event.media and hasattr(event.media, "document"):
         doc = event.media.document
 
-        # Extract Filename
+        # Get Filename
         file_name = "Unknown.mp4"
         if hasattr(doc, "attributes"):
             for attr in doc.attributes:
@@ -122,15 +100,19 @@ async def handler(event):
                     file_name = attr.file_name
                     break
 
-        status_msg = await event.reply(f"🚀 Allocating space for `{file_name}`...")
+        # Reply with status
+        status_msg = await event.reply(f"🚀 Found `{file_name}`. Initializing...")
 
         try:
-            await fast_download(client, status_msg, file_name)
-            await status_msg.edit(f"✅ **Done!** `{file_name}` is ready for sorting.")
+            # FIX IS HERE: We pass 'event.message' (source) AND 'status_msg' (output)
+            await fast_download(client, event.message, file_name, status_msg)
+
+            await status_msg.edit(f"✅ **Done!** `{file_name}` is ready.")
+            print(f"✅ Finished: {file_name}")
         except Exception as e:
-            print(f"❌ Download Failed: {e}")
+            print(f"❌ Error: {e}")
             await status_msg.edit(f"❌ Error: `{str(e)}`")
 
 
-print("✅ High-Speed Bot Active!")
+print("✅ Bot Active! Waiting for files...")
 client.run_until_disconnected()
